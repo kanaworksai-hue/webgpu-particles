@@ -4,10 +4,15 @@
 let canvas, context, device, format;
 let computePipeline, renderPipeline;
 let particleBuffers, uniformBuffer, renderBindGroup, computeBindGroups;
-// Detect mobile and set appropriate particle count
+
+// Detect device type
+const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
-let numParticles = isMobile ? 10000 : 50000;
+
+// Very conservative particle counts - iOS WebGPU is still experimental
+let numParticles = isIOS ? 3000 : (isMobile ? 8000 : 50000);
 let currentBuffer = 0;
+let isRunning = true;
 
 // Simulation parameters
 let params = {
@@ -462,11 +467,17 @@ function updateMousePosition(x, y) {
 }
 
 function setupControls() {
-    // Particle count - adjust for mobile
+    // Particle count - adjust for device
     const countSlider = document.getElementById('particle-count');
     const countValue = document.getElementById('count-value');
     
-    if (isMobile) {
+    if (isIOS) {
+        countSlider.max = 10000;
+        countSlider.min = 500;
+        countSlider.step = 500;
+        countSlider.value = numParticles;
+        countValue.textContent = numParticles;
+    } else if (isMobile) {
         countSlider.max = 30000;
         countSlider.value = numParticles;
         countValue.textContent = numParticles;
@@ -528,19 +539,22 @@ function setupControls() {
 let time = 0;
 
 function render() {
-    const now = performance.now();
-    const deltaTime = (now - lastTime) / 1000;
-    lastTime = now;
-    time += deltaTime;
+    if (!isRunning) return;
+    
+    try {
+        const now = performance.now();
+        const deltaTime = (now - lastTime) / 1000;
+        lastTime = now;
+        time += deltaTime;
 
-    // FPS calculation
-    frameCount++;
-    if (frameCount >= 30) {
-        fps = Math.round(frameCount / (deltaTime * 30));
-        frameCount = 0;
-        document.getElementById('fps').textContent = fps;
-        document.getElementById('particle-stat').textContent = numParticles.toLocaleString();
-    }
+        // FPS calculation
+        frameCount++;
+        if (frameCount >= 30) {
+            fps = Math.round(frameCount / (deltaTime * 30));
+            frameCount = 0;
+            document.getElementById('fps').textContent = fps;
+            document.getElementById('particle-stat').textContent = numParticles.toLocaleString();
+        }
 
     // Update uniforms
     const uniformData = new Float32Array([
@@ -589,6 +603,16 @@ function render() {
     device.queue.submit([commandEncoder.finish()]);
 
     requestAnimationFrame(render);
+    } catch (error) {
+        console.error('Render error:', error);
+        isRunning = false;
+        document.getElementById('error-message').innerHTML = `
+            <h2>⚠️ Rendering Error</h2>
+            <p>${error.message}</p>
+            <p style="margin-top: 15px;"><button onclick="location.reload()">Reload Page</button></p>
+        `;
+        document.getElementById('error-message').style.display = 'block';
+    }
 }
 
 // Global functions for buttons
@@ -621,6 +645,11 @@ function explode() {
 function toggleControls() {
     const controls = document.getElementById('controls');
     controls.classList.toggle('hidden');
+}
+
+function stopSimulation() {
+    isRunning = false;
+    document.getElementById('fps').textContent = 'Stopped';
 }
 
 // Mobile: toggle controls on drag handle
