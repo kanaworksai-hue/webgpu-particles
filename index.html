@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WebGPU Particle System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #error-message {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid #f00;
+            color: #fff;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            max-width: 90%;
+        }
+
+        #controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            color: #fff;
+            z-index: 100;
+            min-width: 280px;
+            max-width: 90vw;
+            max-height: 80vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+        }
+
+        #controls.hidden {
+            transform: translateX(calc(100% + 40px));
+        }
+
+        #toggle-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 24px;
+            cursor: pointer;
+            z-index: 99;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+        }
+
+        #controls h2 {
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            color: #0ff;
+            text-shadow: 0 0 10px #0ff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 0.85em;
+            color: #aaa;
+            margin-bottom: 5px;
+        }
+
+        .control-group input[type="range"] {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .control-group input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #0ff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 0 10px #0ff;
+        }
+
+        .control-group input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #0ff;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 10px #0ff;
+        }
+
+        .control-group select {
+            width: 100%;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        .control-group select:focus {
+            border-color: #0ff;
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+
+        .value-display {
+            float: right;
+            color: #0ff;
+            font-weight: bold;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            background: rgba(0, 255, 255, 0.2);
+            border: 1px solid #0ff;
+            color: #0ff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            background: rgba(0, 255, 255, 0.4);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        #stats {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 0.85em;
+            z-index: 100;
+        }
+
+        #stats p {
+            margin: 3px 0;
+        }
+
+        #stats span {
+            color: #0f0;
+            font-weight: bold;
+        }
+
+        #instructions {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 10px;
+            color: #888;
+            font-size: 0.8em;
+            z-index: 100;
+            text-align: right;
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {
+            #controls {
+                top: auto;
+                bottom: 0;
+                right: 0;
+                left: 0;
+                max-width: 100%;
+                border-radius: 20px 20px 0 0;
+                max-height: 60vh;
+                transform: translateY(0);
+            }
+
+            #controls.hidden {
+                transform: translateY(calc(100% - 60px));
+            }
+
+            #toggle-btn {
+                display: flex;
+                top: auto;
+                bottom: 70px;
+                right: 20px;
+            }
+
+            #stats {
+                bottom: auto;
+                top: 20px;
+                left: 20px;
+                font-size: 0.75em;
+                padding: 10px;
+            }
+
+            #instructions {
+                display: none;
+            }
+
+            .control-group label {
+                font-size: 0.9em;
+            }
+        }
+
+        /* Drag handle for mobile */
+        .drag-handle {
+            display: none;
+            width: 40px;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 3px;
+            margin: 0 auto 15px;
+        }
+
+        @media (max-width: 768px) {
+            .drag-handle {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+
+    <div id="error-message">
+        <h2>⚠️ WebGPU Not Supported</h2>
+        <p>Your browser doesn't support WebGPU yet.</p>
+        <p style="margin-top: 15px; font-size: 0.9em;">Try Chrome 113+, Edge 113+, or Safari 18+ (macOS Sonoma)</p>
+    </div>
+
+    <div id="controls">
+        <div class="drag-handle"></div>
+        <h2>🎆 Particle Controls</h2>
+
+        <div class="control-group">
+            <label>Particle Count <span class="value-display" id="count-value">50000</span></label>
+            <input type="range" id="particle-count" min="1000" max="200000" value="50000" step="1000">
+        </div>
+
+        <div class="control-group">
+            <label>Color Mode</label>
+            <select id="color-mode">
+                <option value="rainbow">🌈 Rainbow</option>
+                <option value="fire">🔥 Fire</option>
+                <option value="ice">❄️ Ice</option>
+                <option value="neon">💜 Neon</option>
+                <option value="galaxy">🌌 Galaxy</option>
+                <option value="matrix">💚 Matrix</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Effect Mode</label>
+            <select id="effect-mode">
+                <option value="attract">🌀 Attract</option>
+                <option value="repel">💥 Repel</option>
+                <option value="vortex">🌪️ Vortex</option>
+                <option value="gravity">⬇️ Gravity</option>
+                <option value="chaos">🎲 Chaos</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Force Strength <span class="value-display" id="force-value">0.5</span></label>
+            <input type="range" id="force" min="0" max="1" value="0.5" step="0.01">
+        </div>
+
+        <div class="control-group">
+            <label>Particle Size <span class="value-display" id="size-value">3</span></label>
+            <input type="range" id="particle-size" min="1" max="10" value="3" step="0.5">
+        </div>
+
+        <div class="control-group">
+            <label>Speed <span class="value-display" id="speed-value">1.0</span></label>
+            <input type="range" id="speed" min="0.1" max="3" value="1" step="0.1">
+        </div>
+
+        <div class="control-group">
+            <label>Trail Length <span class="value-display" id="trail-value">0.95</span></label>
+            <input type="range" id="trail" min="0" max="0.99" value="0.95" step="0.01">
+        </div>
+
+        <div class="button-row">
+            <button onclick="resetParticles()">🔄 Reset</button>
+            <button onclick="explode()">💥 Explode</button>
+        </div>
+    </div>
+
+    <button id="toggle-btn" onclick="toggleControls()">⚙️</button>
+
+    <div id="stats">
+        <p>FPS: <span id="fps">0</span></p>
+        <p>Particles: <span id="particle-stat">0</span></p>
+    </div>
+
+    <div id="instructions">
+        Click/Touch to interact<br>
+        Drag to move attractor
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
