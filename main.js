@@ -4,7 +4,9 @@
 let canvas, context, device, format;
 let computePipeline, renderPipeline;
 let particleBuffers, uniformBuffer, renderBindGroup, computeBindGroups;
-let numParticles = 50000;
+// Detect mobile and set appropriate particle count
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+let numParticles = isMobile ? 10000 : 50000;
 let currentBuffer = 0;
 
 // Simulation parameters
@@ -460,9 +462,16 @@ function updateMousePosition(x, y) {
 }
 
 function setupControls() {
-    // Particle count
+    // Particle count - adjust for mobile
     const countSlider = document.getElementById('particle-count');
     const countValue = document.getElementById('count-value');
+    
+    if (isMobile) {
+        countSlider.max = 30000;
+        countSlider.value = numParticles;
+        countValue.textContent = numParticles;
+    }
+    
     countSlider.addEventListener('input', (e) => {
         countValue.textContent = e.target.value;
     });
