@@ -4,6 +4,13 @@
 let canvas, context, device, format;
 let computePipeline, renderPipeline;
 let particleBuffers, uniformBuffer, renderBindGroup, computeBindGroups;
+let audioContext = null;
+let analyser = null;
+let audioData = null;
+let audioFreq = null;
+let audioSource = null;
+let audioStream = null;
+let audioReady = false;
 
 // Detect device type
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -25,7 +32,13 @@ let params = {
     effectMode: 0, // 0: attract, 1: repel, 2: vortex, 3: gravity, 4: chaos
     colorMode: 0,  // 0: rainbow, 1: fire, 2: ice, 3: neon, 4: galaxy, 5: matrix
     particleSize: 3.0,
-    trailFade: 0.95
+    trailFade: 0.95,
+    audioMode: 0,
+    audioBoost: 1.0,
+    audioLevel: 0.0,
+    audioBass: 0.0,
+    audioMid: 0.0,
+    audioTreble: 0.0
 };
 
 // FPS tracking
@@ -96,7 +109,11 @@ async function createPipelines() {
             colorMode: f32,
             particleSize: f32,
             mouseDown: f32,
-            time: f32
+            time: f32,
+            audioLevel: f32,
+            audioBass: f32,
+            audioMid: f32,
+            audioTreble: f32
         }
 
         @group(0) @binding(0) var<storage, read> particlesIn: array<Particle>;
@@ -118,10 +135,15 @@ async function createPipelines() {
             let mouse = params.mouse;
             let res = params.resolution;
             let dt = params.deltaTime * params.speed;
+            let audio = params.audioLevel;
+            let bass = params.audioBass;
+            let mid = params.audioMid;
+            let treble = params.audioTreble;
+            let audioPush = 1.0 + audio * 2.5;
             let force = params.force;
             let effectMode = i32(params.effectMode);
             
-            // Calculate direction to mouse
+            // Calculate direction to audio attractor
             let toMouse = mouse - p.pos;
             let dist = length(toMouse);
             let dir = normalize(toMouse);
@@ -164,9 +186,26 @@ async function createPipelines() {
                 }
             }
 
+            // Audio-driven swirl and pulse
+            let swirl = vec2f(-dir.y, dir.x) * (treble * 320.0 + audio * 140.0);
+            accel += swirl;
+            accel += dir * (bass * 620.0);
+
+            // Global flow field to prevent collapse
+            let n1 = hash(p.seed * 91.7 + params.time * 0.13);
+            let n2 = hash(p.seed * 37.1 + params.time * 0.17 + 3.1);
+            let flow = vec2f(sin(n1 * 6.283 + params.time), cos(n2 * 6.283 + params.time * 1.2));
+            accel += flow * (120.0 + audio * 220.0);
+
+            // Soft repulsion from center for visual spread
+            let center = res * 0.5;
+            let fromCenter = p.pos - center;
+            let centerDist = length(fromCenter) + 0.001;
+            accel += normalize(fromCenter) * (20.0 + audio * 80.0) / (centerDist * 0.02 + 1.0);
+
             // Update velocity with damping
-            p.vel += accel * dt;
-            p.vel *= 0.99;
+            p.vel += accel * dt * audioPush;
+            p.vel *= mix(0.987, 0.95, audio);
             
             // Limit velocity
             let speed = length(p.vel);
@@ -184,7 +223,7 @@ async function createPipelines() {
             if (p.pos.y > res.y) { p.pos.y -= res.y; }
 
             // Update life based on speed
-            p.life = min(1.0, length(p.vel) / 200.0 + 0.3);
+            p.life = min(1.0, length(p.vel) / 200.0 + 0.3 + audio * 0.4);
 
             particlesOut[i] = p;
         }
@@ -202,7 +241,18 @@ async function createPipelines() {
             colorMode: f32,
             particleSize: f32,
             mouseDown: f32,
-            time: f32
+            time: f32,
+            audioLevel: f32,
+            audioBass: f32,
+            audioMid: f32,
+            audioTreble: f32
+        }
+
+        struct Particle {
+            pos: vec2f,
+            vel: vec2f,
+            life: f32,
+            seed: f32
         }
 
         struct VertexOutput {
@@ -211,7 +261,7 @@ async function createPipelines() {
             @location(1) pointCoord: vec2f
         }
 
-        @group(0) @binding(0) var<storage, read> particles: array<vec4f>;
+        @group(0) @binding(0) var<storage, read> particles: array<Particle>;
         @group(0) @binding(1) var<uniform> params: Params;
 
         fn hue2rgb(h: f32) -> vec3f {
@@ -265,9 +315,9 @@ async function createPipelines() {
             @builtin(instance_index) instanceIndex: u32
         ) -> VertexOutput {
             let particle = particles[instanceIndex];
-            let pos = particle.xy;
-            let life = particle.z;
-            let seed = particle.w;
+            let pos = particle.pos;
+            let life = particle.life;
+            let seed = particle.seed;
 
             // Quad vertices
             let quadPos = array<vec2f, 6>(
@@ -279,7 +329,7 @@ async function createPipelines() {
                 vec2f(1.0, 1.0)
             );
 
-            let size = params.particleSize * (0.5 + life * 0.5);
+            let size = params.particleSize * (0.5 + life * 0.5 + params.audioLevel * 0.8);
             let vertPos = quadPos[vertexIndex] * size;
 
             var output: VertexOutput;
@@ -292,7 +342,8 @@ async function createPipelines() {
 
             let colorMode = i32(params.colorMode);
             let color = getColor(seed, life, colorMode);
-            output.color = vec4f(color, life * 0.8);
+            let pulse = 0.6 + params.audioLevel * 0.8 + params.audioTreble * 0.6;
+            output.color = vec4f(color * pulse, life * (0.7 + params.audioLevel * 0.6));
             output.pointCoord = quadPos[vertexIndex] * 0.5 + 0.5;
 
             return output;
@@ -385,7 +436,7 @@ function createParticleBuffers() {
 
     // Create uniform buffer
     uniformBuffer = device.createBuffer({
-        size: 48, // 12 floats * 4 bytes
+        size: 64, // 16 floats * 4 bytes
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
 
@@ -423,41 +474,7 @@ function updateRenderBindGroup() {
 }
 
 function setupEventListeners() {
-    // Mouse events
-    canvas.addEventListener('mousedown', (e) => {
-        params.mouseDown = 1;
-        updateMousePosition(e.clientX, e.clientY);
-    });
-
-    canvas.addEventListener('mousemove', (e) => {
-        updateMousePosition(e.clientX, e.clientY);
-    });
-
-    canvas.addEventListener('mouseup', () => {
-        params.mouseDown = 0;
-    });
-
-    canvas.addEventListener('mouseleave', () => {
-        params.mouseDown = 0;
-    });
-
-    // Touch events
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        params.mouseDown = 1;
-        const touch = e.touches[0];
-        updateMousePosition(touch.clientX, touch.clientY);
-    }, { passive: false });
-
-    canvas.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        const touch = e.touches[0];
-        updateMousePosition(touch.clientX, touch.clientY);
-    }, { passive: false });
-
-    canvas.addEventListener('touchend', () => {
-        params.mouseDown = 0;
-    });
+    // Mouse/touch input intentionally disabled for audio-driven mode
 }
 
 function updateMousePosition(x, y) {
@@ -534,9 +551,119 @@ function setupControls() {
         params.trailFade = parseFloat(e.target.value);
         trailValue.textContent = params.trailFade.toFixed(2);
     });
+
+    // Audio mode
+    const audioMode = document.getElementById('audio-mode');
+    audioMode.addEventListener('change', async (e) => {
+        params.audioMode = e.target.value === 'on' ? 1 : 0;
+        if (params.audioMode === 1) {
+            await startAudio();
+        } else {
+            stopAudio();
+        }
+    });
+
+    // Audio boost
+    const audioBoost = document.getElementById('audio-boost');
+    const audioBoostValue = document.getElementById('audio-boost-value');
+    audioBoost.addEventListener('input', (e) => {
+        params.audioBoost = parseFloat(e.target.value);
+        audioBoostValue.textContent = params.audioBoost.toFixed(1);
+    });
 }
 
 let time = 0;
+
+async function startAudio() {
+    if (!window.isSecureContext) {
+        alert('Microphone requires HTTPS or localhost.');
+        params.audioMode = 0;
+        document.getElementById('audio-mode').value = 'off';
+        return;
+    }
+    if (audioReady) return;
+    try {
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.8;
+        audioData = new Uint8Array(analyser.fftSize);
+        audioFreq = new Uint8Array(analyser.frequencyBinCount);
+        audioSource = audioContext.createMediaStreamSource(audioStream);
+        audioSource.connect(analyser);
+        audioReady = true;
+    } catch (error) {
+        console.error('Audio init error:', error);
+        params.audioMode = 0;
+        document.getElementById('audio-mode').value = 'off';
+        alert('Microphone permission denied or unavailable.');
+    }
+}
+
+function stopAudio() {
+    audioReady = false;
+    if (audioSource) {
+        audioSource.disconnect();
+        audioSource = null;
+    }
+    if (audioStream) {
+        audioStream.getTracks().forEach((t) => t.stop());
+        audioStream = null;
+    }
+    if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+    }
+    analyser = null;
+    audioData = null;
+    audioFreq = null;
+    params.audioLevel = 0;
+    params.audioBass = 0;
+    params.audioMid = 0;
+    params.audioTreble = 0;
+}
+
+function updateAudio() {
+    if (!audioReady || !analyser) {
+        params.audioLevel = 0;
+        params.audioBass = 0;
+        params.audioMid = 0;
+        params.audioTreble = 0;
+        return;
+    }
+
+    analyser.getByteTimeDomainData(audioData);
+    analyser.getByteFrequencyData(audioFreq);
+
+    // RMS volume
+    let sum = 0;
+    for (let i = 0; i < audioData.length; i++) {
+        const v = (audioData[i] - 128) / 128;
+        sum += v * v;
+    }
+    let level = Math.sqrt(sum / audioData.length);
+
+    // Frequency bands
+    const bandCount = audioFreq.length;
+    const bassEnd = Math.floor(bandCount * 0.1);
+    const midEnd = Math.floor(bandCount * 0.4);
+    let bass = 0, mid = 0, treble = 0;
+
+    for (let i = 0; i < bassEnd; i++) bass += audioFreq[i];
+    for (let i = bassEnd; i < midEnd; i++) mid += audioFreq[i];
+    for (let i = midEnd; i < bandCount; i++) treble += audioFreq[i];
+
+    bass /= Math.max(1, bassEnd);
+    mid /= Math.max(1, midEnd - bassEnd);
+    treble /= Math.max(1, bandCount - midEnd);
+
+    const boost = params.audioBoost;
+    params.audioLevel = Math.min(1, level * 2.5 * boost);
+    params.audioBass = Math.min(1, (bass / 255) * 2.2 * boost);
+    params.audioMid = Math.min(1, (mid / 255) * 1.8 * boost);
+    params.audioTreble = Math.min(1, (treble / 255) * 1.6 * boost);
+}
 
 function render() {
     if (!isRunning) return;
@@ -556,9 +683,26 @@ function render() {
             document.getElementById('particle-stat').textContent = numParticles.toLocaleString();
         }
 
+    // Audio
+    updateAudio();
+
+    // Audio-driven virtual attractor (always on)
+    let mouseXForSim = canvas.width * 0.5;
+    let mouseYForSim = canvas.height * 0.5;
+    let mouseDownForSim = 0.0;
+    if (params.audioMode === 1) {
+        const cx = canvas.width * 0.5;
+        const cy = canvas.height * 0.5;
+        const wobbleX = (params.audioTreble - 0.5) * 260 + Math.sin(time * 1.7) * 160;
+        const wobbleY = (params.audioBass - 0.5) * 260 + Math.cos(time * 1.3) * 160;
+        mouseXForSim = cx + wobbleX * (0.5 + params.audioLevel);
+        mouseYForSim = cy + wobbleY * (0.5 + params.audioLevel);
+        mouseDownForSim = 1.0;
+    }
+
     // Update uniforms
     const uniformData = new Float32Array([
-        params.mouseX, params.mouseY,
+        mouseXForSim, mouseYForSim,
         canvas.width, canvas.height,
         Math.min(deltaTime, 0.05),
         params.force,
@@ -566,8 +710,12 @@ function render() {
         params.effectMode,
         params.colorMode,
         params.particleSize,
-        params.mouseDown,
-        time
+        mouseDownForSim,
+        time,
+        params.audioLevel,
+        params.audioBass,
+        params.audioMid,
+        params.audioTreble
     ]);
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 

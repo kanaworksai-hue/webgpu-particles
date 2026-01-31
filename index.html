@@ -334,6 +334,19 @@
             <input type="range" id="trail" min="0" max="0.99" value="0.95" step="0.01">
         </div>
 
+        <div class="control-group">
+            <label>Audio React</label>
+            <select id="audio-mode">
+                <option value="off">Off</option>
+                <option value="on">On (Mic)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Audio Boost <span class="value-display" id="audio-boost-value">1.0</span></label>
+            <input type="range" id="audio-boost" min="0" max="3" value="1" step="0.1">
+        </div>
+
         <div class="button-row">
             <button onclick="resetParticles()">🔄 Reset</button>
             <button onclick="explode()">💥 Explode</button>
